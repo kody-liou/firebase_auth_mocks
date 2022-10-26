@@ -239,6 +239,14 @@ void main() {
     );
   });
 
+  test('auth.currentUser is MockUser', () async {
+    final auth = MockFirebaseAuth();
+    expect(
+      auth.currentUser,
+      isA<MockUser?>(),
+    );
+  });
+
   test('verifyPasswordResetCode returns MockUser.email', () async {
     final mockUser = MockUser(email: 'email@gmail.com');
     final auth = MockFirebaseAuth(mockUser: mockUser);

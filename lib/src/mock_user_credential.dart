@@ -13,7 +13,7 @@ class MockUserCredential implements UserCredential {
         _mockUser = mockUser;
 
   @override
-  User get user => _mockUser ?? MockUser(isAnonymous: _isAnonymous);
+  MockUser? get user => _mockUser ?? MockUser(isAnonymous: _isAnonymous);
 
   @override
   // TODO: implement additionalUserInfo

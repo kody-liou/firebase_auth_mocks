@@ -9,12 +9,12 @@ import 'mock_user.dart';
 import 'mock_user_credential.dart';
 
 class MockFirebaseAuth implements FirebaseAuth {
-  final stateChangedStreamController = StreamController<User?>();
-  late Stream<User?> stateChangedStream;
-  final userChangedStreamController = StreamController<User?>();
-  late Stream<User?> userChangedStream;
+  final stateChangedStreamController = StreamController<MockUser?>();
+  late Stream<MockUser?> stateChangedStream;
+  final userChangedStreamController = StreamController<MockUser?>();
+  late Stream<MockUser?> userChangedStream;
   MockUser? _mockUser;
-  User? _currentUser;
+  MockUser? _currentUser;
   final AuthExceptions? _authExceptions;
 
   MockFirebaseAuth({
@@ -35,12 +35,12 @@ class MockFirebaseAuth implements FirebaseAuth {
   }
 
   @override
-  User? get currentUser {
+  MockUser? get currentUser {
     return _currentUser;
   }
 
   @override
-  Future<UserCredential> signInWithCredential(AuthCredential? credential) {
+  Future<MockUserCredential> signInWithCredential(AuthCredential? credential) {
     if (_authExceptions?.signInWithCredential != null) {
       throw (_authExceptions!.signInWithCredential!);
     }
@@ -49,7 +49,7 @@ class MockFirebaseAuth implements FirebaseAuth {
   }
 
   @override
-  Future<UserCredential> signInWithEmailAndPassword({
+  Future<MockUserCredential> signInWithEmailAndPassword({
     required String email,
     required String password,
   }) {
@@ -61,7 +61,7 @@ class MockFirebaseAuth implements FirebaseAuth {
   }
 
   @override
-  Future<UserCredential> createUserWithEmailAndPassword({
+  Future<MockUserCredential> createUserWithEmailAndPassword({
     required String email,
     required String password,
   }) {
@@ -78,7 +78,7 @@ class MockFirebaseAuth implements FirebaseAuth {
   }
 
   @override
-  Future<UserCredential> signInWithCustomToken(String token) async {
+  Future<MockUserCredential> signInWithCustomToken(String token) async {
     if (_authExceptions?.signInWithCustomToken != null) {
       throw (_authExceptions!.signInWithCustomToken!);
     }
@@ -93,7 +93,7 @@ class MockFirebaseAuth implements FirebaseAuth {
   }
 
   @override
-  Future<UserCredential> signInAnonymously() {
+  Future<MockUserCredential> signInAnonymously() {
     if (_authExceptions?.signInAnonymously != null) {
       throw (_authExceptions!.signInAnonymously!);
     }
@@ -117,7 +117,7 @@ class MockFirebaseAuth implements FirebaseAuth {
     return Future.value([]);
   }
 
-  Future<UserCredential> _fakeSignIn({bool isAnonymous = false}) {
+  Future<MockUserCredential> _fakeSignIn({bool isAnonymous = false}) {
     final userCredential = MockUserCredential(isAnonymous, mockUser: _mockUser);
     _currentUser = userCredential.user;
     stateChangedStreamController.add(_currentUser);
@@ -125,18 +125,18 @@ class MockFirebaseAuth implements FirebaseAuth {
     return Future.value(userCredential);
   }
 
-  Future<UserCredential> _fakeSignUp({bool isAnonymous = false}) {
+  Future<MockUserCredential> _fakeSignUp({bool isAnonymous = false}) {
     return _fakeSignIn(isAnonymous: isAnonymous);
   }
 
-  Stream<User> get onAuthStateChanged =>
+  Stream<MockUser> get onAuthStateChanged =>
       authStateChanges().map((event) => event!);
 
   @override
-  Stream<User?> authStateChanges() => stateChangedStream;
+  Stream<MockUser?> authStateChanges() => stateChangedStream;
 
   @override
-  Stream<User?> userChanges() => userChangedStream;
+  Stream<MockUser?> userChanges() => userChangedStream;
 
   @override
   Future<void> verifyPhoneNumber({
