@@ -1,3 +1,80 @@
+## 0.12.0
+
+- Fixed compilation issues due to breaking changes in [firebase_auth_platform_interface](https://pub.dev/packages/firebase_auth_platform_interface/changelog#6160) ([PR-99](https://github.com/atn832/firebase_auth_mocks/pull/99)). Thank you [gnurik](https://github.com/gnurik)!
+
+## 0.11.0
+
+- BREAKING CHANGE: Replaced the `MockUser.exception` pattern by `whenCalling(...).on(...).thenThrow(...)` ([PR-95](https://github.com/atn832/firebase_auth_mocks/pull/95)).
+- `FirebaseAuth.createUserWithEmailAndPassword` returns `ProviderData`. Thank you [robyf](https://github.com/atn832/firebase_auth_mocks/pull/90)!
+- Implemented `User.updatePhotoURL`. Thank you [bifrostyyy](https://github.com/atn832/firebase_auth_mocks/pull/91)!
+- Implemented `User.linkWithProvider`, and `User.unlink`. Thank you [bifrostyyy](https://github.com/atn832/firebase_auth_mocks/pull/91)!
+- Make `User.reload` throw exceptions on demand ([9ad29f0](https://github.com/atn832/firebase_auth_mocks/commit/9ad29f057660c3e1869a55d57c9972c0137626bf)).
+
+## 0.10.3
+
+Fixed a bug where `MockUserCredential.user` would create a new MockUser at every call, in the anonymous case.
+
+## 0.10.2+1
+
+Make `authForFakeFirestore` send an event at the same time as the other two streams to fix race condition when Fake Cloud Firestore gets the latest user to check security rules.
+
+## 0.10.2
+
+Implemented `authForFakeFirestore` for Fake Cloud Firestore's security rules.
+
+## 0.10.1
+
+`User.getIdTokenResult` will return `customClaims` if `idTokenResult` is not explicitly set.
+
+## 0.10.0
+
+BREAKING CHANGE. Use the `whenCalling(...).on(...).thenThrow(...)` pattern instead of `AuthExceptions` ([PR-87](https://github.com/atn832/firebase_auth_mocks/pull/87)).
+
+Instead of setting up your exception like this:
+
+```dart
+final auth = MockFirebaseAuth(
+  authExceptions: AuthExceptions(
+    signInWithCredential: FirebaseAuthException(code: 'something'),
+  ),
+);
+```
+
+Use:
+
+```dart
+whenCalling(Invocation.method(#signInWithCredential, null))
+  .on(auth)
+  .thenThrow(FirebaseAuthException(code: 'bla'));
+```
+
+You can also be more specific on when to throw the exception. See the README and <https://pub.dev/packages/mock_exceptions>.
+
+## 0.9.3
+
+- Implemented `FirebaseAuth.signInWithPopup` and `FirebaseAuth.signInWithProvider`. Thanks [ga-bri-el](https://github.com/atn832/firebase_auth_mocks/pull/85)!
+
+## 0.9.2
+
+- Fixed a crash when testing in signed in mode for an anonymous user. Thanks [BenVercammen](https://github.com/BenVercammen)!
+- Fixed `User.displayName` so that it returns `null` by default. Thanks [BenVercammen](https://github.com/BenVercammen)!
+
+## 0.9.1
+
+- Implemented `FirebaseAuth.fetchSignInMethodsForEmail`. Thanks [BenVercammen](https://github.com/BenVercammen)!
+- Implemented `User.linkWithCredential`. Thanks [BenVercammen](https://github.com/BenVercammen)!
+- Support setting a `customClaim` for `User.getIdToken`. Thanks [kody-liou](https://github.com/kody-liou)!
+
+## 0.9.0
+
+- Updated dependency to firebase_auth ^4.0.0.
+
+## 0.8.7
+
+- Implemented proper generation of the `auth_time`, `exp` and `iat` values in `User.getIdToken`. Thanks [kody-liou](https://github.com/kody-liou)!
+- Implemented `User.getIdTokenResult`. Thank you [BenGMiles](https://github.com/BenGMiles)!
+- Fixed `User.email` so that it returns `null` by default. Thank you [defuncart](https://github.com/defuncart)!
+
 ## 0.8.6
 
 - Implemented generation of proper JWT token in `User.getIdToken`. Thanks [kody-liou](https://github.com/kody-liou)!

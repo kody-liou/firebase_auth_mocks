@@ -1,8 +1,10 @@
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
-import 'package:uuid/uuid.dart';
 import 'package:equatable/equatable.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_auth_mocks/src/mock_user_credential.dart';
+import 'package:firebase_auth_platform_interface/firebase_auth_platform_interface.dart';
+import 'package:mock_exceptions/mock_exceptions.dart';
+import 'package:uuid/uuid.dart';
 
 class MockUser with EquatableMixin implements User {
   final bool _isAnonymous;
@@ -11,10 +13,14 @@ class MockUser with EquatableMixin implements User {
   String? _email;
   String? _displayName;
   final String? _phoneNumber;
-  final String? _photoURL;
+  String? _photoURL;
   final List<UserInfo> _providerData;
   final String? _refreshToken;
   final UserMetadata? _metadata;
+  final IdTokenResult? _idTokenResult;
+  late final DateTime _idTokenAuthTime;
+  final DateTime? _idTokenExp;
+  final Map<String, dynamic> _customClaim;
 
   MockUser({
     bool isAnonymous = false,
@@ -27,6 +33,10 @@ class MockUser with EquatableMixin implements User {
     List<UserInfo>? providerData,
     String? refreshToken,
     UserMetadata? metadata,
+    IdTokenResult? idTokenResult,
+    DateTime? idTokenAuthTime,
+    DateTime? idTokenExp,
+    Map<String, dynamic>? customClaim,
   })  : _isAnonymous = isAnonymous,
         _isEmailVerified = isEmailVerified,
         _uid = uid ?? const Uuid().v4(),
@@ -36,12 +46,11 @@ class MockUser with EquatableMixin implements User {
         _photoURL = photoURL,
         _providerData = providerData ?? [],
         _refreshToken = refreshToken,
-        _metadata = metadata;
-
-  FirebaseAuthException? _exception;
-
-  /// Sets a [FirebaseAuthException]
-  set exception(FirebaseAuthException value) => _exception = value;
+        _metadata = metadata,
+        _idTokenResult = idTokenResult,
+        _idTokenAuthTime = idTokenAuthTime ?? DateTime.now(),
+        _idTokenExp = idTokenExp,
+        _customClaim = customClaim ?? {};
 
   @override
   bool get isAnonymous => _isAnonymous;
@@ -53,14 +62,14 @@ class MockUser with EquatableMixin implements User {
   String get uid => _uid;
 
   @override
-  String? get email => _email ?? '_test_$uid@example.test';
+  String? get email => _email;
 
   set email(String? value) {
     _email = value;
   }
 
   @override
-  String? get displayName => _displayName ?? 'fake_name';
+  String? get displayName => _displayName;
 
   set displayName(String? value) {
     _displayName = value;
@@ -72,6 +81,10 @@ class MockUser with EquatableMixin implements User {
   @override
   String? get photoURL => _photoURL ?? 'https://i.stack.imgur.com/34AD2.jpg';
 
+  set photoURL(String? value) {
+    _photoURL = value;
+  }
+
   @override
   List<UserInfo> get providerData => _providerData;
 
@@ -79,17 +92,35 @@ class MockUser with EquatableMixin implements User {
   String? get refreshToken => _refreshToken;
 
   @override
+  Future<IdTokenResult> getIdTokenResult([bool forceRefresh = false]) {
+    return Future.value(getIdTokenResultSync());
+  }
+
+  IdTokenResult getIdTokenResultSync() {
+    return _idTokenResult ??
+        IdTokenResult(PigeonIdTokenResult(
+            authTimestamp: 1655946582,
+            claims: _customClaim,
+            expirationTimestamp: 1656305736,
+            issuedAtTimestamp: 1656302136,
+            token: 'fake_token',
+            signInProvider: 'google.com'));
+  }
+
+  @override
   Future<String> getIdToken([bool forceRefresh = false]) {
-    var payload = {
+    final payload = {
       'name': displayName,
       'picture': photoURL,
       'iss': 'fake_iss',
       'aud': 'fake_aud',
-      'auth_time': 1655946582,
+      'auth_time': _idTokenAuthTime.millisecondsSinceEpoch ~/ 1000,
       'user_id': uid,
       'sub': uid,
-      'iat': 1656302136,
-      'exp': 1656305736,
+      // https://firebase.google.com/docs/reference/admin/node/firebase-admin.auth.decodedidtoken
+      'exp': (_idTokenExp ?? DateTime.now().add(Duration(hours: 1)))
+              .millisecondsSinceEpoch ~/
+          1000,
       'email': email,
       'email_verified': emailVerified,
       'firebase': {
@@ -98,7 +129,8 @@ class MockUser with EquatableMixin implements User {
           'email': [email]
         },
         'sign_in_provider': 'google.com'
-      }
+      },
+      ..._customClaim,
     };
     // Create a json web token
     final jwt = JWT(
@@ -107,7 +139,8 @@ class MockUser with EquatableMixin implements User {
     );
 
     // Sign it (default with HS256 algorithm)
-    var token = jwt.sign(SecretKey('secret passphrase'));
+    // jwt.sign will populate iat
+    final token = jwt.sign(SecretKey('secret passphrase'));
     return Future.value(token);
   }
 
@@ -124,10 +157,12 @@ class MockUser with EquatableMixin implements User {
         _photoURL,
         _refreshToken,
         _metadata,
+        providerData
       ];
 
   @override
   Future<void> reload() {
+    maybeThrowException(this, Invocation.method(#reload, []));
     // Do nothing.
     return Future.value();
   }
@@ -140,24 +175,30 @@ class MockUser with EquatableMixin implements User {
 
   @override
   Future<void> updateEmail(String value) {
-    _maybeThrowException();
-
+    maybeThrowException(this, Invocation.method(#updateEmail, [value]));
     email = value;
+    return Future.value();
+  }
 
+  @override
+  Future<void> updatePhotoURL(String? value) {
+    photoURL = value;
     return Future.value();
   }
 
   @override
   Future<UserCredential> reauthenticateWithCredential(
       AuthCredential? credential) {
-    _maybeThrowException();
+    maybeThrowException(
+        this, Invocation.method(#reauthenticateWithCredential, [credential]));
 
     return Future.value(MockUserCredential(false, mockUser: this));
   }
 
   @override
   Future<void> updatePassword(String newPassword) {
-    _maybeThrowException();
+    maybeThrowException(
+        this, Invocation.method(#updatePassword, [newPassword]));
 
     // Do nothing.
     return Future.value();
@@ -165,7 +206,7 @@ class MockUser with EquatableMixin implements User {
 
   @override
   Future<void> delete() {
-    _maybeThrowException();
+    maybeThrowException(this, Invocation.method(#delete, []));
 
     // Do nothing.
     return Future.value();
@@ -175,19 +216,85 @@ class MockUser with EquatableMixin implements User {
   Future<void> sendEmailVerification([
     ActionCodeSettings? actionCodeSettings,
   ]) {
-    _maybeThrowException();
+    maybeThrowException(
+        this, Invocation.method(#sendEmailVerification, [actionCodeSettings]));
 
     // Do nothing
     return Future.value();
   }
 
-  void _maybeThrowException() {
-    if (_exception != null) {
-      final exceptionCopy = _exception!;
-      _exception = null;
+  @override
+  Future<UserCredential> linkWithCredential(AuthCredential credential) async {
+    maybeThrowException(
+        this, Invocation.method(#linkWithCredential, [credential]));
 
-      throw (exceptionCopy);
+    return Future.value(MockUserCredential(false, mockUser: this));
+  }
+
+  @override
+  Future<UserCredential> linkWithProvider(AuthProvider provider) async {
+    if (providerData.any((info) => info.providerId == provider.providerId)) {
+      throw FirebaseAuthException(
+        code: 'provider-already-linked',
+        message: 'User has already been linked to the given provider.',
+      );
     }
+    maybeThrowException(this, Invocation.method(#linkWithProvider, [provider]));
+    providerData.add(
+      UserInfo.fromPigeon(PigeonUserInfo(
+          providerId: provider.providerId,
+          isAnonymous: false,
+          isEmailVerified: _isEmailVerified,
+          uid: _uid)),
+    );
+    return Future.value(MockUserCredential(false, mockUser: this));
+  }
+
+  @override
+  Future<User> unlink(String providerId) async {
+    if (!providerData.any((info) => info.providerId == providerId)) {
+      throw FirebaseAuthException(
+        code: 'no-such-provider',
+        message: 'User is not linked to the given provider.',
+      );
+    }
+    maybeThrowException(this, Invocation.method(#unlink, [providerId]));
+    providerData.removeWhere((info) => info.providerId == providerId);
+    return Future.value(this);
+  }
+
+  MockUser copyWith({
+    bool? isAnonymous,
+    bool? isEmailVerified,
+    String? uid,
+    String? email,
+    String? displayName,
+    String? phoneNumber,
+    String? photoURL,
+    List<UserInfo>? providerData,
+    String? refreshToken,
+    UserMetadata? metadata,
+    IdTokenResult? idTokenResult,
+    DateTime? idTokenAuthTime,
+    DateTime? idTokenExp,
+    Map<String, dynamic>? customClaim,
+  }) {
+    return MockUser(
+      isAnonymous: isAnonymous ?? _isAnonymous,
+      isEmailVerified: isEmailVerified ?? _isEmailVerified,
+      uid: uid ?? _uid,
+      email: email ?? _email,
+      displayName: displayName ?? _displayName,
+      phoneNumber: phoneNumber ?? _phoneNumber,
+      photoURL: photoURL ?? _photoURL,
+      providerData: providerData ?? _providerData,
+      refreshToken: refreshToken ?? _refreshToken,
+      metadata: metadata ?? _metadata,
+      idTokenResult: idTokenResult ?? _idTokenResult,
+      idTokenAuthTime: idTokenAuthTime ?? _idTokenAuthTime,
+      idTokenExp: idTokenExp ?? _idTokenExp,
+      customClaim: customClaim ?? _customClaim,
+    );
   }
 
   @override

@@ -2,20 +2,40 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
+import 'package:firebase_auth_mocks/src/mock_user_credential.dart';
+import 'package:firebase_auth_platform_interface/firebase_auth_platform_interface.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
+import 'package:mock_exceptions/mock_exceptions.dart';
 import 'package:test/test.dart';
 
-final tUser = MockUser(
-  isAnonymous: false,
-  uid: 'T3STU1D',
-  email: 'bob@thebuilder.com',
-  displayName: 'Bob Builder',
-  phoneNumber: '0800 I CAN FIX IT',
-  photoURL: 'http://photos.url/bobbie.jpg',
-  refreshToken: 'some_long_token',
-);
+final userIdTokenResult = IdTokenResult(PigeonIdTokenResult(
+  authTimestamp: DateTime.now().millisecondsSinceEpoch,
+  claims: {'role': 'admin'},
+  token: 'some_long_token',
+  expirationTimestamp:
+      DateTime.now().add(Duration(days: 1)).millisecondsSinceEpoch,
+  issuedAtTimestamp:
+      DateTime.now().subtract(Duration(days: 1)).millisecondsSinceEpoch,
+  signInProvider: 'phone',
+));
 
 void main() {
+  late MockUser tUser;
+
+  setUp(
+    () {
+      tUser = MockUser(
+        isAnonymous: false,
+        email: 'bob@thebuilder.com',
+        displayName: 'Bob Builder',
+        phoneNumber: '0800 I CAN FIX IT',
+        photoURL: 'http://photos.url/bobbie.jpg',
+        refreshToken: 'some_long_token',
+        idTokenResult: userIdTokenResult,
+      );
+    },
+  );
+
   test('Returns no user if not signed in', () async {
     final auth = MockFirebaseAuth();
     final user = auth.currentUser;
@@ -44,13 +64,61 @@ void main() {
           email: email, password: password);
       final user = result.user!;
       expect(user.email, email);
+      final providerData = user.providerData;
+      expect(providerData.length, 1);
+      expect(providerData.first.providerId, 'password');
+      expect(providerData.first.email, 'some@email.com');
+      expect(providerData.first.uid, user.uid);
+
       expect(auth.authStateChanges(), emitsInOrder([null, isA<User>()]));
       expect(auth.userChanges(), emitsInOrder([null, isA<User>()]));
       expect(user.isAnonymous, isFalse);
+      expect(user.emailVerified, isTrue);
+    });
+
+    test('with email and password without email verification by default',
+        () async {
+      final email = 'some@email.com';
+      final password = 'some!password';
+      final auth = MockFirebaseAuth(verifyEmailAutomatically: false);
+      final result = await auth.createUserWithEmailAndPassword(
+          email: email, password: password);
+      final user = result.user!;
+      expect(user.email, email);
+      final providerData = user.providerData;
+      expect(providerData.length, 1);
+      expect(providerData.first.providerId, 'password');
+      expect(providerData.first.email, 'some@email.com');
+      expect(providerData.first.uid, user.uid);
+
+      expect(auth.authStateChanges(), emitsInOrder([null, isA<User>()]));
+      expect(auth.userChanges(), emitsInOrder([null, isA<User>()]));
+      expect(user.isAnonymous, isFalse);
+      expect(user.emailVerified, isFalse);
     });
   });
 
   group('Returns a mocked user after sign in', () {
+    test('with popup', () async {
+      final auth = MockFirebaseAuth(mockUser: tUser);
+      final result = await auth.signInWithPopup(AppleAuthProvider());
+      final user = result.user!;
+      expect(user, tUser);
+      expect(auth.authStateChanges(), emitsInOrder([null, isA<User>()]));
+      expect(auth.userChanges(), emitsInOrder([null, isA<User>()]));
+      expect(user.isAnonymous, false);
+    });
+
+    test('with Provider', () async {
+      final auth = MockFirebaseAuth(mockUser: tUser);
+      final result = await auth.signInWithProvider(AppleAuthProvider());
+      final user = result.user!;
+      expect(user, tUser);
+      expect(auth.authStateChanges(), emitsInOrder([null, isA<User>()]));
+      expect(auth.userChanges(), emitsInOrder([null, isA<User>()]));
+      expect(user.isAnonymous, false);
+    });
+
     test('with Credential', () async {
       final auth = MockFirebaseAuth(mockUser: tUser);
       // Credentials would typically come from GoogleSignIn.
@@ -121,10 +189,25 @@ void main() {
     });
   });
 
+  test('calling MockUserCredential.user several times returns the same object',
+      () {
+    final credential = MockUserCredential(true);
+    final uid1 = credential.user.uid;
+    final uid2 = credential.user.uid;
+    expect(uid1, uid2);
+  });
+
   test('Returns a mocked user if already signed in', () async {
     final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
     final user = auth.currentUser;
     expect(user, tUser);
+  });
+
+  test('Returns a mocked anonymous user if already signed in', () {
+    var anonymousUser = MockUser(isAnonymous: true, uid: 'T3STU1D');
+    final auth = MockFirebaseAuth(signedIn: true, mockUser: anonymousUser);
+    final user = auth.currentUser;
+    expect(user, anonymousUser);
   });
 
   test('Returns a hardcoded user token', () async {
@@ -132,6 +215,28 @@ void main() {
     final user = auth.currentUser!;
     final idToken = await user.getIdToken();
     expect(idToken, isNotEmpty);
+  });
+
+  test('Returns a hardcoded user token result', () async {
+    final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
+    final user = auth.currentUser!;
+    final idTokenResult = await user.getIdTokenResult();
+    expect(idTokenResult, isNotNull);
+    // Using IdTokenResult's implementation of toString
+    // https://github.com/firebase/flutterfire/blob/982bdfb5fbfae4a68e1af6ab62a9bd762891b217/packages/firebase_auth/firebase_auth_platform_interface/lib/src/id_token_result.dart#L53
+    expect(
+      idTokenResult.toString(),
+      userIdTokenResult.toString(),
+    );
+  });
+  test('token result, if not set, reuses customClaims', () async {
+    final auth = MockFirebaseAuth(
+      signedIn: true,
+      mockUser: MockUser(customClaim: {'weight': 70}),
+    );
+    final user = auth.currentUser!;
+    final idTokenResult = await user.getIdTokenResult();
+    expect(idTokenResult.claims, {'weight': 70});
   });
 
   test('Returns null after sign out', () async {
@@ -149,7 +254,7 @@ void main() {
     final auth = MockFirebaseAuth();
 
     expect(
-      () async => await auth.sendPasswordResetEmail(email: ''),
+      () => auth.sendPasswordResetEmail(email: ''),
       returnsNormally,
     );
   });
@@ -164,7 +269,7 @@ void main() {
     final auth = MockFirebaseAuth();
 
     expect(
-      () async => await auth.sendSignInLinkToEmail(
+      () => auth.sendSignInLinkToEmail(
         email: 'test@example.com',
         actionCodeSettings: ActionCodeSettings(
           url: 'https://example.com',
@@ -181,7 +286,7 @@ void main() {
       final auth = MockFirebaseAuth();
 
       expect(
-        () async => await auth.sendSignInLinkToEmail(
+        () => auth.sendSignInLinkToEmail(
           email: 'test@example.com',
           actionCodeSettings: ActionCodeSettings(
             url: 'https://example.com',
@@ -190,7 +295,7 @@ void main() {
         throwsA(isA<ArgumentError>()),
       );
       expect(
-        () async => await auth.sendSignInLinkToEmail(
+        () => auth.sendSignInLinkToEmail(
           email: 'test@example.com',
           actionCodeSettings: ActionCodeSettings(
             url: 'https://example.com',
@@ -206,7 +311,7 @@ void main() {
     final auth = MockFirebaseAuth();
 
     expect(
-      () async => await auth.confirmPasswordReset(
+      () => auth.confirmPasswordReset(
         code: 'code',
         newPassword: 'password',
       ),
@@ -237,102 +342,127 @@ void main() {
     },
   );
 
+  test('should link credentials', () {
+    final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
+    final user = auth.currentUser;
+    final credential =
+        AuthCredential(providerId: 'providerId', signInMethod: 'signInMethod');
+    expect(user?.linkWithCredential(credential), completes);
+  });
+
   group('exceptions', () {
-    test('signInWithCredential', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-          signInWithCredential: FirebaseAuthException(code: 'bla'),
-        ),
-      );
+    test('signInWithPopup', () async {
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#signInWithPopup, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'red'));
       expect(
-        () async => await auth.signInWithCredential(FakeAuthCredential()),
+        () => auth.signInWithPopup(AppleAuthProvider()),
+        throwsA(isA<FirebaseAuthException>()),
+      );
+    });
+
+    test('signInWithProvider', () async {
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#signInWithProvider, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'veronica'));
+      expect(
+        () => auth.signInWithProvider(AppleAuthProvider()),
+        throwsA(isA<FirebaseAuthException>()),
+      );
+    });
+
+    test('signInWithCredential', () async {
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#signInWithCredential, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'bla'));
+      expect(
+        () => auth.signInWithCredential(FakeAuthCredential()),
         throwsA(isA<FirebaseAuthException>()),
       );
     });
 
     test('signInWithEmailAndPassword', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-          signInWithEmailAndPassword: FirebaseAuthException(code: 'bla'),
-        ),
-      );
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#signInWithEmailAndPassword, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'veronica'));
       expect(
-        () async =>
-            await auth.signInWithEmailAndPassword(email: '', password: ''),
+        () => auth.signInWithEmailAndPassword(email: '', password: ''),
         throwsA(isA<FirebaseAuthException>()),
       );
     });
 
     test('createUserWithEmailAndPassword', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-          createUserWithEmailAndPassword: FirebaseAuthException(code: 'bla'),
-        ),
-      );
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#createUserWithEmailAndPassword, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'bla'));
       expect(
-        () async =>
-            await auth.createUserWithEmailAndPassword(email: '', password: ''),
+        () => auth.createUserWithEmailAndPassword(
+            email: 'me@mail.com', password: '123'),
         throwsA(isA<FirebaseAuthException>()),
       );
     });
 
     test('signInWithCustomToken', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-          signInWithCustomToken: FirebaseAuthException(code: 'bla'),
-        ),
-      );
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#signInWithCustomToken, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'bla'));
       expect(
-        () async => await auth.signInWithCustomToken(''),
+        () => auth.signInWithCustomToken(''),
         throwsA(isA<FirebaseAuthException>()),
       );
     });
 
     test('signInAnonymously', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-          signInAnonymously: FirebaseAuthException(code: 'bla'),
-        ),
-      );
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#signInAnonymously, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'bla'));
       expect(
-        () async => await auth.signInAnonymously(),
+        () => auth.signInAnonymously(),
         throwsA(isA<FirebaseAuthException>()),
       );
     });
 
     test('fetchSignInMethodsForEmail', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-            fetchSignInMethodsForEmail: FirebaseAuthException(code: 'bla')),
-      );
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(
+              #fetchSignInMethodsForEmail, ['someone@somewhere.com']))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'bla'));
+      expect(() => auth.fetchSignInMethodsForEmail('someone@somewhere.com'),
+          throwsA(isA<FirebaseAuthException>()));
       expect(
-        () async => await auth.fetchSignInMethodsForEmail(''),
-        throwsA(isA<FirebaseAuthException>()),
-      );
+          () =>
+              auth.fetchSignInMethodsForEmail('someoneelse@somewhereelse.com'),
+          returnsNormally);
     });
 
     test('sendPasswordResetEmail', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-          sendPasswordResetEmail: FirebaseAuthException(code: 'invalid-email'),
-        ),
-      );
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#sendPasswordResetEmail, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'invalid-email'));
 
       expect(
-        () async => await auth.sendPasswordResetEmail(email: ''),
+        () => auth.sendPasswordResetEmail(email: ''),
         throwsA(isA<FirebaseAuthException>()),
       );
     });
 
     test('sendSignInLinkToEmail', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-          sendSignInLinkToEmail: FirebaseAuthException(code: 'invalid-email'),
-        ),
-      );
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#sendSignInLinkToEmail, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'invalid-email'));
 
       expect(
-        () async => await auth.sendSignInLinkToEmail(
+        () => auth.sendSignInLinkToEmail(
           email: 'test@example.com',
           actionCodeSettings: ActionCodeSettings(
             url: 'https://example.com',
@@ -344,32 +474,48 @@ void main() {
     });
 
     test('confirmPasswordReset', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-          confirmPasswordReset:
-              FirebaseAuthException(code: 'invalid-action-code'),
-        ),
-      );
+      final auth = MockFirebaseAuth();
 
+      whenCalling(Invocation.method(
+              #confirmPasswordReset, null, {#code: contains('code')}))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'invalid-action-code'));
       expect(
-        () async => await auth.confirmPasswordReset(
+        () => auth.confirmPasswordReset(
           code: 'code',
           newPassword: 'password',
         ),
         throwsA(isA<FirebaseAuthException>()),
       );
+      expect(
+          () => auth.confirmPasswordReset(
+                code: '10293',
+                newPassword: 'password',
+              ),
+          returnsNormally);
     });
 
     test('verifyPasswordResetCode', () async {
-      final auth = MockFirebaseAuth(
-        authExceptions: AuthExceptions(
-          verifyPasswordResetCode:
-              FirebaseAuthException(code: 'invalid-action-code'),
-        ),
-      );
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#verifyPasswordResetCode, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'invalid-action-code'));
 
       expect(
-        () async => await auth.verifyPasswordResetCode('code'),
+        () => auth.verifyPasswordResetCode('code'),
+        throwsA(isA<FirebaseAuthException>()),
+      );
+    });
+
+    test('User.reload', () async {
+      final auth = MockFirebaseAuth(signedIn: true);
+      final user = auth.currentUser;
+      expect(user, isNotNull);
+      whenCalling(Invocation.method(#reload, null))
+          .on(user!)
+          .thenThrow(FirebaseAuthException(code: 'error'));
+      expect(
+        () => user.reload(),
         throwsA(isA<FirebaseAuthException>()),
       );
     });
@@ -384,7 +530,8 @@ void main() {
   });
 
   test('User.updateDisplayName changes displayName', () async {
-    final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
+    // Make a deep copy to not modify the original and affect other tests.
+    final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser.copyWith());
     final user = auth.currentUser;
     await user!.updateDisplayName('New Bob');
     expect(user.displayName, 'New Bob');
@@ -401,7 +548,9 @@ void main() {
 
   test('User.updateEmail can throw exception', () async {
     final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
-    tUser.exception = FirebaseAuthException(code: 'invalid-email');
+    whenCalling(Invocation.method(#updateEmail, null))
+        .on(tUser)
+        .thenThrow(FirebaseAuthException(code: 'invalid-email'));
     final user = auth.currentUser;
     expect(
       () async => await user!.updateEmail('john@domain.tld'),
@@ -409,11 +558,18 @@ void main() {
     );
   });
 
+  test('User.updatePhotoURL changes photoURL', () async {
+    final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
+    expect(auth.currentUser, isNotNull);
+    await auth.currentUser!.updatePhotoURL('https://example.com/photo.jpg');
+    expect(auth.currentUser!.photoURL, 'https://example.com/photo.jpg');
+  });
+
   test('User.reauthenticateWithCredential works', () async {
     final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
     final user = auth.currentUser;
     expect(
-      () async => await user!.reauthenticateWithCredential(
+      () => user!.reauthenticateWithCredential(
           AuthCredential(signInMethod: '', providerId: '')),
       returnsNormally,
     );
@@ -421,10 +577,12 @@ void main() {
 
   test('User.reauthenticateWithCredential can throw exception', () async {
     final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
-    tUser.exception = FirebaseAuthException(code: 'wrong-password');
+    whenCalling(Invocation.method(#reauthenticateWithCredential, null))
+        .on(tUser)
+        .thenThrow(FirebaseAuthException(code: 'wrong-password'));
     final user = auth.currentUser;
     expect(
-      () async => await user!.reauthenticateWithCredential(
+      () => user!.reauthenticateWithCredential(
           AuthCredential(signInMethod: '', providerId: '')),
       throwsA(isA<FirebaseAuthException>()),
     );
@@ -434,17 +592,19 @@ void main() {
     final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
     final user = auth.currentUser;
     expect(
-      () async => await user!.updatePassword('newPassword'),
+      () => user!.updatePassword('newPassword'),
       returnsNormally,
     );
   });
 
   test('User.updatePassword can throw exception', () async {
     final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
-    tUser.exception = FirebaseAuthException(code: 'weak-password');
+    whenCalling(Invocation.method(#updatePassword, null))
+        .on(tUser)
+        .thenThrow(FirebaseAuthException(code: 'weak-password'));
     final user = auth.currentUser;
     expect(
-      () async => await user!.updatePassword('newPassword'),
+      () => user!.updatePassword('newPassword'),
       throwsA(isA<FirebaseAuthException>()),
     );
   });
@@ -453,27 +613,74 @@ void main() {
     final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
     final user = auth.currentUser;
     expect(
-      () async => await user!.delete(),
+      () => user!.delete(),
       returnsNormally,
     );
   });
 
   test('User.delete can throw exception', () async {
     final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
-    tUser.exception = FirebaseAuthException(code: 'wrong-password');
+    whenCalling(Invocation.method(#delete, null))
+        .on(tUser)
+        .thenThrow(FirebaseAuthException(code: 'wrong-password'));
     final user = auth.currentUser;
     expect(
-      () async => await user!.delete(),
+      () => user!.delete(),
       throwsA(isA<FirebaseAuthException>()),
     );
   });
 
   test('User.sendEmailVerification can throw exception', () async {
     final auth = MockFirebaseAuth(mockUser: tUser, signedIn: true);
-    tUser.exception = FirebaseAuthException(code: 'verification-failure');
+    whenCalling(Invocation.method(#sendEmailVerification, null))
+        .on(tUser)
+        .thenThrow(FirebaseAuthException(code: 'verification-failure'));
     final user = auth.currentUser;
     expect(
-      () async => await user?.sendEmailVerification(),
+      () => user?.sendEmailVerification(),
+      throwsA(isA<FirebaseAuthException>()),
+    );
+  });
+
+  test('User.linkWithCredential can throw exception', () {
+    final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
+    final user = auth.currentUser;
+    final credential =
+        AuthCredential(providerId: 'providerId', signInMethod: 'signInMethod');
+    whenCalling(Invocation.method(#linkWithCredential, null))
+        .on(tUser)
+        .thenThrow(FirebaseAuthException(code: 'verification-failure'));
+    expect(
+      () => user?.linkWithCredential(credential),
+      throwsA(isA<FirebaseAuthException>()),
+    );
+  });
+
+  test('User.linkWithProvider and unlink', () async {
+    final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
+    final user = auth.currentUser;
+    final provider = TwitterAuthProvider();
+    // linkWithProvider works if not already linked.
+    final cred = await user!.linkWithProvider(provider);
+    expect(cred, isNotNull);
+    expect(
+      user.providerData.any((info) => info.providerId == 'twitter.com'),
+      true,
+    );
+    // tUser is still linked to twitter.com from previous test.
+    // linkWithProvider throws Exception if already linked.
+    expect(
+      () async => await user.linkWithProvider(provider),
+      throwsA(isA<FirebaseAuthException>()),
+    );
+
+    // unlink succeeds.
+    final newUser = await user.unlink(provider.providerId);
+    expect(newUser.providerData, isEmpty);
+
+    // unlink throws Exception if no provider is linked.
+    expect(
+      () async => await user.unlink(provider.providerId),
       throwsA(isA<FirebaseAuthException>()),
     );
   });
@@ -484,12 +691,6 @@ void main() {
     // Fire a second event.
     await auth.signOut();
     expect(await auth.userChanges().first, isNull);
-  });
-
-  test('$AuthExceptions ensure equality', () {
-    final authExceptions1 = AuthExceptions();
-    final authExceptions2 = AuthExceptions();
-    expect(authExceptions1, authExceptions2);
   });
 
   test('Id token contains user data', () async {
@@ -515,17 +716,6 @@ void main() {
     expect(decodedToken['email_verified'], user.emailVerified);
   });
 
-  test('getIdToken still works when using the default value', () async {
-    final idToken = await MockUser().getIdToken();
-    final decodedToken = JwtDecoder.decode(idToken);
-    expect(decodedToken['name'] != null, true);
-    expect(decodedToken['picture'] != null, true);
-    expect(decodedToken['user_id'] != null, true);
-    expect(decodedToken['sub'] != null, true);
-    expect(decodedToken['email'] != null, true);
-    expect(decodedToken['email_verified'] != null, true);
-  });
-
   test('Each decoded token\'s user_id should not change', () async {
     final user = MockUser();
     final idToken1 = await user.getIdToken();
@@ -535,16 +725,132 @@ void main() {
     expect(decodedToken1['user_id'], decodedToken2['user_id']);
   });
 
-  test('Each edecoded token\'s user_id should unique', () async {
+  test('Each decoded token\'s user_id should unique', () async {
     final user1 = MockUser();
     final user2 = MockUser();
     final idToken1 = await user1.getIdToken();
     final decodedToken1 = JwtDecoder.decode(idToken1);
     final idToken2 = await user2.getIdToken();
     final decodedToken2 = JwtDecoder.decode(idToken2);
-    expect(decodedToken1['user_id'] is String, true);
-    expect(decodedToken2['user_id'] is String, true);
-    expect(decodedToken1['user_id'] != decodedToken2['user_id'], true);
+    expect(decodedToken1['user_id'], isA<String>());
+    expect(decodedToken2['user_id'], isA<String>());
+    expect(decodedToken1['user_id'], isNot(decodedToken2['user_id']));
+  });
+
+  test(
+      'Each decoded token\'s auth_time and exp should be the time in seconds since unix epoch',
+      () async {
+    final idToken = await tUser.getIdToken();
+    final decodedToken = JwtDecoder.decode(idToken);
+    final isTimeInSecondsSinceUnixEpoch = predicate(
+      (dynamic number) => number is int && number.toString().length == 10,
+      'is time in seconds since unix epoch',
+    );
+    expect(decodedToken['auth_time'], isTimeInSecondsSinceUnixEpoch);
+    expect(decodedToken['exp'], isTimeInSecondsSinceUnixEpoch);
+  });
+
+  test(
+      'The decodedToken\'s auth_time and exp should as same as user.idTokenAuthTime after modify MockUser',
+      () async {
+    final customAuthTime = DateTime.parse('2020-01-01');
+    final customExp = DateTime.parse('2020-01-02');
+    final user = MockUser(
+      idTokenAuthTime: customAuthTime,
+      idTokenExp: customExp,
+    );
+    final idToken = await user.getIdToken();
+    final decodedToken = JwtDecoder.decode(idToken);
+    expect(decodedToken['auth_time'],
+        customAuthTime.millisecondsSinceEpoch ~/ 1000);
+    expect(decodedToken['exp'], customExp.millisecondsSinceEpoch ~/ 1000);
+  });
+
+  test('Set up fetchSignInMethodsForEmail results', () async {
+    final auth = MockFirebaseAuth(
+      signInMethodsForEmail: {
+        'test@example.com': ['password']
+      },
+    );
+    expect(await auth.fetchSignInMethodsForEmail('test@example.com'),
+        equals(['password']));
+  });
+
+  test('Add customClaim into id token', () async {
+    final user = MockUser(customClaim: {'role': 'admin', 'bodyHeight': 169});
+    final idToken = await user.getIdToken();
+    final decodedToken = JwtDecoder.decode(idToken);
+    expect(decodedToken['role'], 'admin');
+    expect(decodedToken['bodyHeight'], 169);
+  });
+
+  test('The customClain should exist after sign-out and sign-in', () async {
+    final auth = MockFirebaseAuth(
+      mockUser: MockUser(customClaim: {'role': 'admin', 'bodyHeight': 169}),
+      signedIn: true,
+    );
+    final decodedToken =
+        JwtDecoder.decode((await auth.currentUser!.getIdToken())!);
+    expect(decodedToken['role'], 'admin');
+    expect(decodedToken['bodyHeight'], 169);
+    await auth.signOut();
+    await auth.signInWithEmailAndPassword(email: '', password: '');
+    final decodedToken2 =
+        JwtDecoder.decode((await auth.currentUser!.getIdToken())!);
+    expect(decodedToken2['role'], 'admin');
+    expect(decodedToken2['bodyHeight'], 169);
+  });
+
+  test('update firebaseAuth user customClaim by copyWith', () async {
+    final auth = MockFirebaseAuth(
+      signedIn: true,
+    );
+    final decodedToken =
+        JwtDecoder.decode((await auth.currentUser!.getIdToken())!);
+    expect(decodedToken['role'], null);
+    expect(decodedToken['bodyHeight'], null);
+
+    auth.mockUser = (auth.currentUser as MockUser)
+        .copyWith(customClaim: {'role': 'admin', 'bodyHeight': 169});
+
+    final decodedToken2 =
+        JwtDecoder.decode((await auth.currentUser!.getIdToken())!);
+    expect(decodedToken2['role'], 'admin');
+    expect(decodedToken2['bodyHeight'], 169);
+  });
+
+  test('authInformationForFakeFirestore', () {
+    final auth = MockFirebaseAuth(mockUser: tUser);
+    auth.signInWithCustomToken('token');
+    expect(
+        auth.authForFakeFirestore,
+        emitsInOrder([
+          null,
+          {
+            'uid': tUser.uid,
+            'token': {
+              'name': 'Bob Builder',
+              'email': 'bob@thebuilder.com',
+              'email_verified': true,
+              'firebase.sign_in_provider': 'phone',
+              'role': 'admin'
+            }
+          }
+        ]));
+  });
+
+  group('MockUser', () {
+    test('when default constructor, expect defaults', () {
+      final user = MockUser();
+      expect(user.isAnonymous, isFalse);
+      expect(user.emailVerified, isTrue);
+      expect(user.uid, isNotNull);
+      expect(user.email, isNull);
+    });
+  });
+
+  test('app', () {
+    expect(MockFirebaseAuth().app, isNotNull);
   });
 }
 
