@@ -541,7 +541,7 @@ void main() {
     final auth = MockFirebaseAuth(signedIn: true, mockUser: tUser);
     final user = auth.currentUser;
     expect(
-      () async => await user!.updateEmail('john@domain.tld'),
+      () => user!.updateEmail('john@domain.tld'),
       returnsNormally,
     );
   });
@@ -553,7 +553,7 @@ void main() {
         .thenThrow(FirebaseAuthException(code: 'invalid-email'));
     final user = auth.currentUser;
     expect(
-      () async => await user!.updateEmail('john@domain.tld'),
+      () => user!.updateEmail('john@domain.tld'),
       throwsA(isA<FirebaseAuthException>()),
     );
   });
@@ -670,7 +670,7 @@ void main() {
     // tUser is still linked to twitter.com from previous test.
     // linkWithProvider throws Exception if already linked.
     expect(
-      () async => await user.linkWithProvider(provider),
+      () => user.linkWithProvider(provider),
       throwsA(isA<FirebaseAuthException>()),
     );
 
@@ -680,7 +680,7 @@ void main() {
 
     // unlink throws Exception if no provider is linked.
     expect(
-      () async => await user.unlink(provider.providerId),
+      () => user.unlink(provider.providerId),
       throwsA(isA<FirebaseAuthException>()),
     );
   });
